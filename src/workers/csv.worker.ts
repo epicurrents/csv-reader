@@ -24,6 +24,16 @@ const SCOPE = 'csv.worker'
 
 const READER = new CsvReader(SETTINGS)
 
+// Forward the reader's progress updates to whatever consumer is listening on
+// the other side of this worker — they arrive as commission-less messages and
+// the consumer matches on the `action` field. Mirrors the wiring all other
+// signal readers use.
+READER.setUpdateCallback((update: { [prop: string]: unknown }) => {
+    if (update.action === 'cache-signals') {
+        postMessage(update)
+    }
+})
+
 onmessage = async (message: WorkerMessage) => {
     if (!message?.data?.action) {
         return
@@ -151,6 +161,9 @@ onmessage = async (message: WorkerMessage) => {
                 return returnFailure(`Validating commission props failed.`)
             }
             if (await READER.setupStudy(data.url, data.authHeader)) {
+                // GenericBiosignalService.handleMessage picks `recordingLength`
+                // out of this response and resolves setupWorker's promise with
+                // it (matching the `SetupStudyResponse = number` contract).
                 return returnSuccess({
                     dataLength: READER.dataLength,
                     recordingLength: READER.totalLength,

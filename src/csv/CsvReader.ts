@@ -101,13 +101,43 @@ export default class CsvReader extends GenericSignalReader implements SignalData
         // Float32 byte count per second so the rolling-cache budgeter sees
         // the right memory footprint.
         this._dataUnitDuration = 1
-        this._dataUnitCount = Math.ceil(parsed.header.duration)
         this._dataUnitSize = parsed.header.samplingRate*parsed.header.columns.length*4
         this._chunkUnitCount = this._dataUnitSize*2 < this.SETTINGS.app.dataChunkSize
             ? Math.floor(this.SETTINGS.app.dataChunkSize/this._dataUnitSize) - 1
             : 1
-        this._totalDataLength = parsed.header.duration
-        this._totalRecordingLength = parsed.header.duration
+        // `_totalDataLength`, `_totalRecordingLength`, and `_dataUnitCount`
+        // must all be derived from the same number — every bound check downstream
+        // ratios one against another and any disagreement turns into an
+        // out-of-bounds error. Two independent constraints make the answer
+        // non-obvious:
+        //
+        //   1. The SAB mutex's `RANGE_END` is stored as `Int32` (see
+        //      `BiosignalMutex` range field declarations). A fractional value
+        //      gets truncated, and any insert that crosses the truncated
+        //      boundary trips an out-of-bounds warning.
+        //   2. The cache-fill loop in `GenericSignalReader.cacheSignals`
+        //      targets `_totalDataLength`; the loop's `getSignalUpdatedRange`
+        //      step reads per-signal `SIGNAL_UPDATED_END` (sample count,
+        //      `Float32`) from the mutex and divides by the stored sampling
+        //      rate (also `Float32`). When `parsed.header.samplingRate` is the
+        //      reciprocal of an inter-row median that doesn't divide evenly
+        //      (e.g. 99.9977 Hz from a nominally-100 Hz file with sub-sample
+        //      jitter), the round-trip can yield a value slightly *greater*
+        //      than `sampleCount / samplingRate`, which then trips
+        //      `_cacheTimeToRecordingTime`'s `time > _totalDataLength` check.
+        //
+        // Pick the unit count as `max(ceil(duration), ceil(sampleCount/samplingRate))`
+        // so the read-back can't overshoot and the integer-Int32 store still
+        // covers the data. `_readSignalPart` returns the actual sample slice
+        // for any over-range request, so no zero padding is invented past
+        // the real data.
+        const durationFloor = Math.ceil(parsed.header.duration)
+        const sampleDerivedLength = parsed.header.samplingRate
+            ? Math.ceil(parsed.header.sampleCount/parsed.header.samplingRate)
+            : durationFloor
+        this._dataUnitCount = Math.max(durationFloor, sampleDerivedLength)
+        this._totalDataLength = this._dataUnitCount*this._dataUnitDuration
+        this._totalRecordingLength = this._totalDataLength
         this._discontinuous = false
         this._url = url
         if (authHeader) {
@@ -161,10 +191,19 @@ export default class CsvReader extends GenericSignalReader implements SignalData
         // `subarray` shares the underlying buffer — cheap. Downstream cache
         // insertion (`combineSignalParts`) copies into the destination as
         // needed, so we don't need to materialise a fresh Float32Array here.
-        const signals = this._csvData.signals.map(col => ({
+        const signals: SignalCachePart['signals'] = this._csvData.signals.map(col => ({
             data: new Float32Array(col.subarray(startSample, endSample)),
             samplingRate: sr,
         }))
+        // Materialise setup-declared derivations after the source slots so the
+        // buffer count matches what `setupMutex` / `setupCache` allocated.
+        // Mirrors the base-class fast path (see `GenericSignalReader._readSignalPart`).
+        for (const slot of this._derivationSlots) {
+            signals.push({
+                data: this._materialiseDerivation(slot, signals),
+                samplingRate: slot.samplingRate,
+            })
+        }
         return {
             signals,
             start,

@@ -203,7 +203,22 @@ export function parseFile (text: string, options: CsvParseOptions = {}): CsvPars
         }
         const med = median(deltas)
         if (med > 0) {
-            header.samplingRate = 1/med
+            const rawRate = 1/med
+            // Snap to the nearest integer when the inferred rate is within
+            // ~0.1 % of one. Sub-sample float jitter in nominally-clean rates
+            // (e.g. a 100 Hz file produced by linear resampling) leaves the
+            // median delta marginally off-integer, which then propagates into
+            // the `samplingRate × duration` round-trip downstream: the SAB
+            // mutex's `SIGNAL_UPDATED_END` (stored as the unrounded
+            // `round(end × sr)`) can exceed the buffer the same multiplication
+            // floored, and the difference reads back as a recording-time
+            // overshoot. Snapping eliminates the round-trip mismatch when the
+            // source rate is "essentially" an integer. Genuinely fractional
+            // rates (e.g. 99.5 Hz) stay verbatim.
+            const integerRate = Math.round(rawRate)
+            header.samplingRate = (integerRate > 0 && Math.abs(rawRate - integerRate)/integerRate <= 1e-3)
+                ? integerRate
+                : rawRate
             const minD = Math.min(...deltas)
             const maxD = Math.max(...deltas)
             const spread = (maxD - minD)/med
