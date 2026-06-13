@@ -70,11 +70,9 @@ export default class CsvReader extends GenericSignalReader implements SignalData
      * base implementation which would call `_decoder.decodeData` on a binary
      * file part — CSV's "decoder" already ran during `setupStudy`, so there's
      * no further work beyond a subarray view per channel.
-     *
-     * The `start` / `end` range is in seconds of recording time; both ends are
-     * clamped against the recording bounds and the empty / out-of-bounds case
-     * returns an empty `signals` array rather than `null` so the cache-fill
-     * loop sees a well-formed (zero-length) update.
+     * @param start - Range start in seconds of recording time (inclusive).
+     * @param end - Range end in seconds of recording time (exclusive); clamped
+     *              to the recording length.
      */
     override async _readSignalPart (start: number, end: number)
         : Promise<SignalCachePart & Omit<SignalDecodeResult, 'signals'> | null>
@@ -130,9 +128,8 @@ export default class CsvReader extends GenericSignalReader implements SignalData
      * (which we override to slice from the parsed Float32Arrays — no further
      * IO during cache fill). After this returns true, the resource can call
      * `setupCache` / `setupMutex` and signal serving works.
-     *
-     * `url` names the source CSV; `authHeader`, when given, is forwarded as
-     * the `Authorization` header on the fetch.
+     * @param url - Source URL of the CSV file.
+     * @param authHeader - Optional `Authorization` header to forward on the fetch.
      */
     async setupStudy (url: string, authHeader?: string): Promise<boolean> {
         if (this._mutex || this._fallbackCache) {
