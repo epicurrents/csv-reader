@@ -41,6 +41,12 @@ const SCOPE = 'CsvReader'
 
 export default class CsvReader extends GenericSignalReader implements SignalDataReader {
 
+    /**
+     * Re-detect the encoding of a buffer. Exposed for tests and for callers
+     * that want to validate a file before instantiating a full reader.
+     */
+    static detectEncoding = detectTextEncoding
+
     /** Fully parsed CSV — populated once during `setupStudy`. */
     protected _csvData: CsvParseResult | null = null
     /** Parsed CSV header, retained alongside `_csvData` for convenient access. */
@@ -60,14 +66,73 @@ export default class CsvReader extends GenericSignalReader implements SignalData
     }
 
     /**
+     * Slice the parsed CSV signals for the requested time range. Overrides the
+     * base implementation which would call `_decoder.decodeData` on a binary
+     * file part — CSV's "decoder" already ran during `setupStudy`, so there's
+     * no further work beyond a subarray view per channel.
+     *
+     * The `start` / `end` range is in seconds of recording time; both ends are
+     * clamped against the recording bounds and the empty / out-of-bounds case
+     * returns an empty `signals` array rather than `null` so the cache-fill
+     * loop sees a well-formed (zero-length) update.
+     */
+    override async _readSignalPart (start: number, end: number)
+        : Promise<SignalCachePart & Omit<SignalDecodeResult, 'signals'> | null>
+    {
+        if (!this._csvData || !this._fileTypeHeader) {
+            Log.error(`Cannot read signal part: CSV data has not been loaded.`, SCOPE)
+            return null
+        }
+        if (start < 0 || start >= this._totalRecordingLength) {
+            Log.error(`Requested signal range ${start} - ${end} was out of recording bounds.`, SCOPE)
+            return null
+        }
+        if (start >= end) {
+            Log.error(`Requested signal range ${start} - ${end} was empty or invalid.`, SCOPE)
+            return null
+        }
+        if (end > this._totalRecordingLength) {
+            end = this._totalRecordingLength
+        }
+        const sr = this._fileTypeHeader.samplingRate
+        const startSample = Math.max(0, Math.floor(start*sr))
+        const totalSamples = this._csvData.signals[0]?.length ?? 0
+        const endSample = Math.min(totalSamples, Math.ceil(end*sr))
+        if (endSample <= startSample) {
+            return { signals: [], start, end }
+        }
+        // `subarray` shares the underlying buffer — cheap. Downstream cache
+        // insertion (`combineSignalParts`) copies into the destination as
+        // needed, so we don't need to materialise a fresh Float32Array here.
+        const signals: SignalCachePart['signals'] = this._csvData.signals.map(col => ({
+            data: new Float32Array(col.subarray(startSample, endSample)),
+            samplingRate: sr,
+        }))
+        // Materialise setup-declared derivations after the source slots so the
+        // buffer count matches what `setupMutex` / `setupCache` allocated.
+        // Mirrors the base-class fast path (see `GenericSignalReader._readSignalPart`).
+        for (const slot of this._derivationSlots) {
+            signals.push({
+                data: this._materialiseDerivation(slot, signals),
+                samplingRate: slot.samplingRate,
+            })
+        }
+        return {
+            signals,
+            start,
+            end,
+        }
+    }
+
+    /**
      * Fetch + parse the entire CSV, then populate the inherited data-unit
      * fields so the base reader's cache-fill loop can drive `_readSignalPart`
      * (which we override to slice from the parsed Float32Arrays — no further
      * IO during cache fill). After this returns true, the resource can call
      * `setupCache` / `setupMutex` and signal serving works.
      *
-     * @param url - Source URL of the CSV file.
-     * @param authHeader - Optional `Authorization` header to forward on the fetch.
+     * `url` names the source CSV; `authHeader`, when given, is forwarded as
+     * the `Authorization` header on the fetch.
      */
     async setupStudy (url: string, authHeader?: string): Promise<boolean> {
         if (this._mutex || this._fallbackCache) {
@@ -151,69 +216,4 @@ export default class CsvReader extends GenericSignalReader implements SignalData
         )
         return true
     }
-
-    /**
-     * Slice the parsed CSV signals for the requested time range. Overrides the
-     * base implementation which would call `_decoder.decodeData` on a binary
-     * file part — CSV's "decoder" already ran during `setupStudy`, so there's
-     * no further work beyond a subarray view per channel.
-     *
-     * `unknownData` and `raw` are accepted for signature compatibility but
-     * ignored: CSV has no per-call uncertainty about data extent (we know the
-     * full sample count) and no separate raw/derived distinction at the file
-     * level.
-     */
-    override async _readSignalPart (start: number, end: number)
-        : Promise<SignalCachePart & Omit<SignalDecodeResult, 'signals'> | null>
-    {
-        if (!this._csvData || !this._fileTypeHeader) {
-            Log.error(`Cannot read signal part: CSV data has not been loaded.`, SCOPE)
-            return null
-        }
-        if (start < 0 || start >= this._totalRecordingLength) {
-            Log.error(`Requested signal range ${start} - ${end} was out of recording bounds.`, SCOPE)
-            return null
-        }
-        if (start >= end) {
-            Log.error(`Requested signal range ${start} - ${end} was empty or invalid.`, SCOPE)
-            return null
-        }
-        if (end > this._totalRecordingLength) {
-            end = this._totalRecordingLength
-        }
-        const sr = this._fileTypeHeader.samplingRate
-        const startSample = Math.max(0, Math.floor(start*sr))
-        const totalSamples = this._csvData.signals[0]?.length ?? 0
-        const endSample = Math.min(totalSamples, Math.ceil(end*sr))
-        if (endSample <= startSample) {
-            return { signals: [], start, end }
-        }
-        // `subarray` shares the underlying buffer — cheap. Downstream cache
-        // insertion (`combineSignalParts`) copies into the destination as
-        // needed, so we don't need to materialise a fresh Float32Array here.
-        const signals: SignalCachePart['signals'] = this._csvData.signals.map(col => ({
-            data: new Float32Array(col.subarray(startSample, endSample)),
-            samplingRate: sr,
-        }))
-        // Materialise setup-declared derivations after the source slots so the
-        // buffer count matches what `setupMutex` / `setupCache` allocated.
-        // Mirrors the base-class fast path (see `GenericSignalReader._readSignalPart`).
-        for (const slot of this._derivationSlots) {
-            signals.push({
-                data: this._materialiseDerivation(slot, signals),
-                samplingRate: slot.samplingRate,
-            })
-        }
-        return {
-            signals,
-            start,
-            end,
-        }
-    }
-
-    /**
-     * Re-detect the encoding of a buffer. Exposed for tests and for callers that
-     * want to validate a file before instantiating a full reader.
-     */
-    static detectEncoding = detectTextEncoding
 }

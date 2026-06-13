@@ -52,30 +52,6 @@ export default class CsvImporter extends GenericStudyImporter implements SignalS
     }
 
     /**
-     * Parse the header portion of a CSV source and stash the result on
-     * `_study.meta`. Returns the parsed header (or null on failure) for
-     * caller-side validation. Used only by {@link readHeader} — the
-     * full-file paths below take care of populating the rest of `meta`.
-     */
-    protected async _readHeaderInfo (source: ArrayBuffer): Promise<CsvHeader | null> {
-        const encoding = detectTextEncoding(source)
-        const decoder = new TextDecoder(encoding.label)
-        const text = decoder.decode(source)
-        const header = parseHeader(text, this._parseOptions)
-        if (!header) {
-            Log.error(`CSV header could not be parsed.`, SCOPE)
-            return null
-        }
-        this._study.meta = {
-            columns: header.columns,
-            metadata: header.metadata,
-            timeColumnIndex: header.timeColumnIndex,
-            encoding: encoding.label,
-        }
-        return header
-    }
-
-    /**
      * Run the full-file parse and write `header`, `channels`, the bundled
      * `BiosignalHeaderRecord`, plus the convenience fields needed by ACC-style
      * loaders (`samplingRate`, `duration`, `nChannels`) into `_study.meta`.
@@ -139,8 +115,39 @@ export default class CsvImporter extends GenericStudyImporter implements SignalS
         )
     }
 
-    async readHeader (source: ArrayBuffer, _config?: unknown): Promise<CsvHeader | null> {
-        return this._readHeaderInfo(source)
+    /**
+     * Parse the header portion of a CSV source and stash the result on
+     * `_study.meta`. Returns the parsed header (or null on failure) for
+     * caller-side validation. Used only by {@link readHeader} — the
+     * full-file paths take care of populating the rest of `meta`.
+     */
+    protected async _readHeaderInfo (source: ArrayBuffer): Promise<CsvHeader | null> {
+        const encoding = detectTextEncoding(source)
+        const decoder = new TextDecoder(encoding.label)
+        const text = decoder.decode(source)
+        const header = parseHeader(text, this._parseOptions)
+        if (!header) {
+            Log.error(`CSV header could not be parsed.`, SCOPE)
+            return null
+        }
+        this._study.meta = {
+            columns: header.columns,
+            metadata: header.metadata,
+            timeColumnIndex: header.timeColumnIndex,
+            encoding: encoding.label,
+        }
+        return header
+    }
+
+    getFileTypeWorker (override?: string): Worker | null {
+        const workerOverride = this._workerOverrides.get(override || 'csv')
+        const worker = workerOverride ? workerOverride() : new Worker(
+            /* webpackChunkName: 'csv.worker' */
+            new URL('../workers/csv.worker', import.meta.url),
+            { type: 'module' },
+        )
+        Log.registerWorker(worker)
+        return worker
     }
 
     async importFile (source: File | StudyFileContext, config?: ConfigReadUrl): Promise<StudyContextFile | null> {
@@ -214,14 +221,7 @@ export default class CsvImporter extends GenericStudyImporter implements SignalS
         return studyFile
     }
 
-    getFileTypeWorker (override?: string): Worker | null {
-        const workerOverride = this._workerOverrides.get(override || 'csv')
-        const worker = workerOverride ? workerOverride() : new Worker(
-            /* webpackChunkName: 'csv.worker' */
-            new URL('../workers/csv.worker', import.meta.url),
-            { type: 'module' },
-        )
-        Log.registerWorker(worker)
-        return worker
+    async readHeader (source: ArrayBuffer, _config?: unknown): Promise<CsvHeader | null> {
+        return this._readHeaderInfo(source)
     }
 }
