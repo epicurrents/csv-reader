@@ -167,39 +167,47 @@ export default class CsvReader extends GenericSignalReader implements SignalData
         this._chunkUnitCount = this._dataUnitSize*2 < this.SETTINGS.app.dataChunkSize
             ? Math.floor(this.SETTINGS.app.dataChunkSize/this._dataUnitSize) - 1
             : 1
-        // `_totalDataLength`, `_totalRecordingLength`, and `_dataUnitCount`
-        // must all be derived from the same number — every bound check downstream
-        // ratios one against another and any disagreement turns into an
-        // out-of-bounds error. Two independent constraints make the answer
-        // non-obvious:
+        // The cache extent (`_dataUnitCount` / `_totalDataLength`) and the
+        // reported recording length (`_totalRecordingLength`) answer different
+        // questions and are derived differently.
         //
+        // `_totalDataLength` is padded up to whole 1-second data units, for two
+        // constraints that would otherwise trip out-of-bounds errors:
         //   1. The SAB mutex's `RANGE_END` is stored as `Int32` (see
         //      `BiosignalMutex` range field declarations). A fractional value
         //      gets truncated, and any insert that crosses the truncated
         //      boundary trips an out-of-bounds warning.
         //   2. The cache-fill loop in `GenericSignalReader.cacheSignals`
-        //      targets `_totalDataLength`; the loop's `getSignalUpdatedRange`
-        //      step reads per-signal `SIGNAL_UPDATED_END` (sample count,
-        //      `Float32`) from the mutex and divides by the stored sampling
-        //      rate (also `Float32`). When `parsed.header.samplingRate` is the
-        //      reciprocal of an inter-row median that doesn't divide evenly
-        //      (e.g. 99.9977 Hz from a nominally-100 Hz file with sub-sample
-        //      jitter), the round-trip can yield a value slightly *greater*
-        //      than `sampleCount / samplingRate`, which then trips
-        //      `_cacheTimeToRecordingTime`'s `time > _totalDataLength` check.
+        //      targets `_totalDataLength`; its `getSignalUpdatedRange` step
+        //      reads per-signal `SIGNAL_UPDATED_END` (sample count, `Float32`)
+        //      from the mutex and divides by the stored sampling rate (also
+        //      `Float32`). When `samplingRate` is the reciprocal of an inter-row
+        //      median that doesn't divide evenly (e.g. 99.9977 Hz from a
+        //      nominally-100 Hz file with sub-sample jitter), the round-trip can
+        //      yield a value slightly *greater* than `sampleCount / samplingRate`,
+        //      which would trip the `time > _totalDataLength` overshoot check.
+        // So `max(ceil(duration), ceil(sampleCount/samplingRate))` keeps the
+        // integer store safely covering the data.
         //
-        // Pick the unit count as `max(ceil(duration), ceil(sampleCount/samplingRate))`
-        // so the read-back can't overshoot and the integer-Int32 store still
-        // covers the data. `_readSignalPart` returns the actual sample slice
-        // for any over-range request, so no zero padding is invented past
-        // the real data.
+        // `_totalRecordingLength` is the TRUE data extent (`sampleCount /
+        // samplingRate`), which may end mid-unit. Reporting the padded
+        // `_totalDataLength` here instead advertises a phantom partial-second
+        // tail for any recording whose sample count isn't a whole multiple of
+        // the sampling rate (3201 samples at 100 Hz = 32.01 s rounding up to
+        // 33 s), and the per-page filter then rings across the data→empty
+        // boundary in that tail. `_totalRecordingLength` is always
+        // `<= _totalDataLength`, so the bound checks that guard against the
+        // length exceeding the cache still hold; `_readSignalPart` clamps `end`
+        // to it, so no zero padding is read past the real data.
         const durationFloor = Math.ceil(parsed.header.duration)
         const sampleDerivedLength = parsed.header.samplingRate
             ? Math.ceil(parsed.header.sampleCount/parsed.header.samplingRate)
             : durationFloor
         this._dataUnitCount = Math.max(durationFloor, sampleDerivedLength)
         this._totalDataLength = this._dataUnitCount*this._dataUnitDuration
-        this._totalRecordingLength = this._totalDataLength
+        this._totalRecordingLength = parsed.header.samplingRate
+            ? parsed.header.sampleCount/parsed.header.samplingRate
+            : this._totalDataLength
         this._discontinuous = false
         this._url = url
         if (authHeader) {
