@@ -199,12 +199,7 @@ export default class CsvImporter extends GenericStudyImporter implements SignalS
             url,
         } as StudyContextFile
         try {
-            const headers = new Headers()
-            if (config?.authHeader) {
-                headers.set('Authorization', config.authHeader)
-            }
-            const response = await fetch(url, { headers })
-            const buffer = await response.arrayBuffer()
+            const buffer = await this._fetchArrayBuffer(url, { authHeader: config?.authHeader })
             const encoding = detectTextEncoding(buffer.slice(0, 4))
             const text = new TextDecoder(encoding.label).decode(buffer)
             const parsed = parseFile(text, this._parseOptions)
