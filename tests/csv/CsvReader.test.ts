@@ -53,6 +53,7 @@ vi.mock('@epicurrents/core', () => ({
 vi.mock('@epicurrents/core/dist/util', () => ({
     detectTextEncoding: () => ({ label: 'utf-8', constructor: Uint8Array }),
     fetchTextFile: vi.fn(),
+    readTextFile: vi.fn(),
 }))
 
 // The CSV body the mocked fetch returns to setupStudy.
@@ -88,7 +89,7 @@ describe('CsvReader.setupStudy', () => {
             encoding: { label: 'utf-8', constructor: Uint8Array },
         })
         const reader = new CsvReader(APP_SETTINGS)
-        const ok = await reader.setupStudy('https://example.com/x.csv')
+        const ok = await reader.setupStudy({ url: 'https://example.com/x.csv' })
         expect(ok).toBe(true)
         const header = (reader as any)._header
         expect(header).toBeDefined()
@@ -106,7 +107,7 @@ describe('CsvReader.setupStudy', () => {
             encoding: { label: 'utf-8', constructor: Uint8Array },
         })
         const reader = new CsvReader(APP_SETTINGS)
-        await reader.setupStudy('https://example.com/x.csv')
+        await reader.setupStudy({ url: 'https://example.com/x.csv' })
         const r = reader as any
         expect(r._dataUnitDuration).toBe(1)
         // duration = 0.03 s → ceil to 1.
@@ -125,18 +126,30 @@ describe('CsvReader.setupStudy', () => {
             encoding: { label: 'utf-8', constructor: Uint8Array },
         })
         const reader = new CsvReader(APP_SETTINGS)
-        await reader.setupStudy('https://example.com/x.csv')
+        await reader.setupStudy({ url: 'https://example.com/x.csv' })
         // Mark the cache as already initialised.
         ;(reader as any)._fallbackCache = {}
-        const second = await reader.setupStudy('https://example.com/y.csv')
+        const second = await reader.setupStudy({ url: 'https://example.com/y.csv' })
         expect(second).toBe(false)
         expect(Log.error).toHaveBeenCalled()
+    })
+
+    it('reads a local source file without fetching it', async () => {
+        const util = await import('@epicurrents/core/dist/util')
+        const readTextFile = util.readTextFile as ReturnType<typeof vi.fn>
+        const file = makeMockedFile(CSV_BODY)
+        readTextFile.mockResolvedValue({ file, encoding: { label: 'utf-8', constructor: Uint8Array } })
+        const reader = new CsvReader(APP_SETTINGS)
+        const ok = await reader.setupStudy({ file })
+        expect(ok).toBe(true)
+        expect(readTextFile).toHaveBeenCalledWith(file)
+        expect(fetchTextFile).not.toHaveBeenCalled()
     })
 
     it('returns false when fetchTextFile fails', async () => {
         fetchTextFile.mockResolvedValue(null)
         const reader = new CsvReader(APP_SETTINGS)
-        const ok = await reader.setupStudy('https://example.com/missing.csv')
+        const ok = await reader.setupStudy({ url: 'https://example.com/missing.csv' })
         expect(ok).toBe(false)
     })
 
@@ -146,7 +159,7 @@ describe('CsvReader.setupStudy', () => {
             encoding: { label: 'utf-8', constructor: Uint8Array },
         })
         const reader = new CsvReader(APP_SETTINGS)
-        const ok = await reader.setupStudy('https://example.com/x.csv')
+        const ok = await reader.setupStudy({ url: 'https://example.com/x.csv' })
         expect(ok).toBe(false)
         expect(Log.error).toHaveBeenCalled()
     })
@@ -167,7 +180,7 @@ describe('CsvReader._readSignalPart', () => {
 
     const makeReader = async () => {
         const reader = new CsvReader(APP_SETTINGS)
-        await reader.setupStudy('https://example.com/x.csv')
+        await reader.setupStudy({ url: 'https://example.com/x.csv' })
         return reader as any
     }
 

@@ -21,12 +21,13 @@
 import {
     GenericSignalReader,
 } from '@epicurrents/core'
-import { detectTextEncoding, fetchTextFile } from '@epicurrents/core/dist/util'
+import { detectTextEncoding, fetchTextFile, readTextFile } from '@epicurrents/core/dist/util'
 import type {
     AppSettings,
     SignalCachePart,
-    SignalDataReader,
+    SignalStudyReader,
     SignalDecodeResult,
+    SignalSourceOptions,
 } from '@epicurrents/core/dist/types'
 import { Log } from 'scoped-event-log'
 import { parseFile } from './CsvParser'
@@ -39,7 +40,7 @@ import type {
 
 const SCOPE = 'CsvReader'
 
-export default class CsvReader extends GenericSignalReader implements SignalDataReader {
+export default class CsvReader extends GenericSignalReader implements SignalStudyReader {
 
     /**
      * Re-detect the encoding of a buffer. Exposed for tests and for callers
@@ -128,10 +129,8 @@ export default class CsvReader extends GenericSignalReader implements SignalData
      * (which we override to slice from the parsed Float32Arrays — no further
      * IO during cache fill). After this returns true, the resource can call
      * `setupCache` / `setupMutex` and signal serving works.
-     * @param url - Source URL of the CSV file.
-     * @param authHeader - Optional `Authorization` header to forward on the fetch.
      */
-    async setupStudy (url: string, authHeader?: string): Promise<boolean> {
+    async setupStudy (source: SignalSourceOptions): Promise<boolean> {
         if (this._mutex || this._fallbackCache) {
             Log.error(
                 [`Could not set study parameters.`, `Signal cache has already been initialized.`],
@@ -139,14 +138,20 @@ export default class CsvReader extends GenericSignalReader implements SignalData
             )
             return false
         }
-        const fetched = await fetchTextFile(url, { authHeader })
+        const sourceName = source.file?.name || source.url || 'CSV source'
+        const fetched = source.file
+                        ? await readTextFile(source.file)
+                        : source.url
+                          ? await fetchTextFile(source.url, { authHeader: source.authHeader })
+                          : null
         if (!fetched) {
+            Log.error(`Could not read the CSV file from ${sourceName}.`, SCOPE)
             return false
         }
         const text = await fetched.file.text()
         const parsed = parseFile(text, this._parseOptions)
         if (!parsed) {
-            Log.error(`CSV parse failed for ${url}.`, SCOPE)
+            Log.error(`CSV parse failed for ${sourceName}.`, SCOPE)
             return false
         }
         this._csvData = parsed
@@ -155,7 +160,7 @@ export default class CsvReader extends GenericSignalReader implements SignalData
         // base class drives its cache layout off of. From this point the
         // inherited `setupCache`/`setupMutex`/`cacheSignals` machinery treats
         // the CSV like any other reader-backed source.
-        this._header = headerToBiosignalHeader(parsed.header, url)
+        this._header = headerToBiosignalHeader(parsed.header, sourceName)
         // Data-unit shape — same 1-second granularity wav-reader uses. The
         // exact `_dataUnitSize` isn't byte-meaningful for CSV (rows are
         // variable-length text), but the cache-fill loop needs a non-zero
@@ -209,12 +214,12 @@ export default class CsvReader extends GenericSignalReader implements SignalData
             ? parsed.header.sampleCount/parsed.header.samplingRate
             : this._totalDataLength
         this._discontinuous = false
-        this._url = url
-        if (authHeader) {
-            this._authHeader = authHeader
+        this._url = source.url || ''
+        if (source.authHeader) {
+            this._authHeader = source.authHeader
         }
         Log.debug(
-            `CSV setup complete for ${url}: ${parsed.header.columns.length} channels, ` +
+            `CSV setup complete for ${sourceName}: ${parsed.header.columns.length} channels, ` +
             `${parsed.header.sampleCount} samples at ${parsed.header.samplingRate.toFixed(2)} Hz ` +
             `(encoding ${fetched.encoding.label}).`,
             SCOPE,

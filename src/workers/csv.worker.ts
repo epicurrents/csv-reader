@@ -149,18 +149,22 @@ onmessage = async (message: WorkerMessage) => {
         case 'setup-worker': {
             const data = validateCommissionProps(
                 message.data as WorkerMessage['data'] & {
-                    url: string
+                    url?: string
                     authHeader?: string
+                    file?: File
                 },
                 {
-                    url: 'String',
+                    // A local study is read from the File and a remote one from the URL, so neither
+                    // can be required on its own; `setupStudy` rejects a source that has neither.
+                    url: 'String?',
                     authHeader: 'String?',
+                    file: 'File?',
                 },
             )
             if (!data) {
                 return returnFailure(`Validating commission props failed.`)
             }
-            if (await READER.setupStudy(data.url, data.authHeader)) {
+            if (await READER.setupStudy({ authHeader: data.authHeader, file: data.file, url: data.url })) {
                 // GenericBiosignalService.handleMessage picks `recordingLength`
                 // out of this response and resolves setupWorker's promise with
                 // it (matching the `SetupStudyResponse = number` contract).
