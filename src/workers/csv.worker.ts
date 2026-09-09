@@ -1,189 +1,69 @@
 /**
- * Epicurrents CSV file worker. Handles the `setup-worker`, `setup-cache`,
- * `cache-signals`, `get-signals`, `release-cache`, `shutdown`, and
- * `update-settings` commissions for a `CsvReader` running off the main
- * thread. Matches the wav-reader/edf-reader action vocabulary so the
- * service layer treats CSV like any other signal source.
- *
+ * Epicurrents CSV file worker. The commissions a signal reader answers alike come from
+ * {@link SignalReaderWorker}; what is added here is `setup-worker`, which opens the study.
  * @package    epicurrents/csv-reader
  * @copyright  2026 Sampsa Lohi
  * @license    Apache-2.0
  */
 
 import { SETTINGS } from '@epicurrents/core'
-import type {
-    BiosignalCacheDerivationSlot,
-    ConfigChannelFilter,
-    WorkerMessage,
-} from '@epicurrents/core/dist/types'
+import { SignalReaderWorker } from '@epicurrents/core/dist/workers'
+import type { WorkerMessage } from '@epicurrents/core/dist/types'
 import { validateCommissionProps } from '@epicurrents/core/dist/util'
 import { Log } from 'scoped-event-log'
 import CsvReader from '#csv/CsvReader'
 
 const SCOPE = 'csv.worker'
 
-const READER = new CsvReader(SETTINGS)
-
-// Forward the reader's progress updates to whatever consumer is listening on
-// the other side of this worker — they arrive as commission-less messages and
-// the consumer matches on the `action` field. Mirrors the wiring all other
-// signal readers use.
-READER.setUpdateCallback((update: { [prop: string]: unknown }) => {
-    if (update.action === 'cache-signals') {
-        postMessage(update)
+class CsvWorker extends SignalReaderWorker<CsvReader> {
+    constructor () {
+        super(new CsvReader(SETTINGS))
+        this._reader.setUpdateCallback((update: { [prop: string]: unknown }) => {
+            if (update.action === 'cache-signals') {
+                postMessage(update)
+            }
+        })
+        this.extendActionMap([['setup-worker', this.setupWorker]])
     }
-})
+
+    /**
+     * Open the study the commission describes.
+     * @param msgData - Data property from the message to the worker.
+     */
+    async setupWorker (msgData: WorkerMessage['data']) {
+        const data = validateCommissionProps(
+            msgData as WorkerMessage['data'] & {
+                authHeader?: string
+                file?: File
+                url?: string
+            },
+            {
+                // A local study is read from the File and a remote one from the URL, so neither can
+                // be required on its own; `setupStudy` rejects a source that has neither.
+                authHeader: 'String?',
+                file: 'File?',
+                url: 'String?',
+            }
+        )
+        if (!data) {
+            return this._failure(msgData, `Validating commission props failed.`)
+        }
+        if (!await this._reader.setupStudy({ authHeader: data.authHeader, file: data.file, url: data.url })) {
+            return this._failure(msgData, `Setting up study failed.`)
+        }
+        return this._success(msgData, {
+            dataLength: this._reader.dataLength,
+            recordingLength: this._reader.totalLength,
+        })
+    }
+}
+
+const WORKER = new CsvWorker()
 
 onmessage = async (message: WorkerMessage) => {
     if (!message?.data?.action) {
         return
     }
-    const { action, rn } = message.data
-    const returnSuccess = (results?: { [key: string]: unknown }) => {
-        postMessage({
-            rn,
-            action,
-            success: true,
-            ...results,
-        })
-    }
-    const returnFailure = (error: string | string[]) => {
-        postMessage({
-            rn,
-            action,
-            success: false,
-            error,
-        })
-    }
-    Log.debug(`Received message with action ${action}.`, SCOPE)
-    switch (action) {
-        case 'cache-signals': {
-            try {
-                const success = await READER.cacheSignals()
-                return returnSuccess({ complete: success })
-            } catch (e: unknown) {
-                Log.error(
-                    `An error occurred while trying to cache signals, operation was aborted: ${
-                        (e as Error).message
-                    }.`,
-                    SCOPE,
-                    e as Error,
-                )
-                return returnFailure((e as Error).message)
-            }
-        }
-        case 'get-signals': {
-            if (!READER.cacheReady) {
-                return returnFailure(`Cannot return signals if signal cache is not yet initialized.`)
-            }
-            const data = validateCommissionProps(
-                message.data as WorkerMessage['data'] & {
-                    config?: ConfigChannelFilter
-                    range: number[]
-                },
-                {
-                    config: 'Object?',
-                    range: ['Number', 'Number'],
-                },
-            )
-            if (!data) {
-                return
-            }
-            try {
-                const sigs = await READER.getSignals(data.range, data.config)
-                if (sigs) {
-                    return returnSuccess({
-                        range: message.data.range,
-                        ...sigs,
-                    })
-                } else {
-                    return returnFailure(`Reader did not return any signals.`)
-                }
-            } catch (e: unknown) {
-                return returnFailure((e as Error).message)
-            }
-        }
-        case 'release-cache': {
-            await READER.releaseCache()
-            return returnSuccess()
-        }
-        case 'setup-cache': {
-            const derivationSlots =
-                (message.data.derivationSlots as BiosignalCacheDerivationSlot[]) || []
-            if (message.data.useMemoryManager) {
-                const data = validateCommissionProps(
-                    message.data as WorkerMessage['data'] & {
-                        buffer: SharedArrayBuffer
-                        range: { start: number }
-                    },
-                    {
-                        buffer: 'SharedArrayBuffer',
-                        range: 'Object',
-                    },
-                )
-                if (!data) {
-                    return
-                }
-                const exportProps = await READER.setupMutex(
-                    data.buffer,
-                    data.range.start,
-                    derivationSlots,
-                )
-                if (exportProps) {
-                    return returnSuccess({
-                        cacheProperties: exportProps,
-                    })
-                } else {
-                    return returnFailure(`Mutex setup failed.`)
-                }
-            } else {
-                const duration = (message.data.dataDuration as number) || 0
-                const success = READER.setupCache(duration, derivationSlots)
-                if (success) {
-                    return returnSuccess()
-                } else {
-                    return returnFailure(`Cache setup failed.`)
-                }
-            }
-        }
-        case 'setup-worker': {
-            const data = validateCommissionProps(
-                message.data as WorkerMessage['data'] & {
-                    url?: string
-                    authHeader?: string
-                    file?: File
-                },
-                {
-                    // A local study is read from the File and a remote one from the URL, so neither
-                    // can be required on its own; `setupStudy` rejects a source that has neither.
-                    url: 'String?',
-                    authHeader: 'String?',
-                    file: 'File?',
-                },
-            )
-            if (!data) {
-                return returnFailure(`Validating commission props failed.`)
-            }
-            if (await READER.setupStudy({ authHeader: data.authHeader, file: data.file, url: data.url })) {
-                // GenericBiosignalService.handleMessage picks `recordingLength`
-                // out of this response and resolves setupWorker's promise with
-                // it (matching the `SetupStudyResponse = number` contract).
-                return returnSuccess({
-                    dataLength: READER.dataLength,
-                    recordingLength: READER.totalLength,
-                })
-            } else {
-                return returnFailure(`Setting up study failed.`)
-            }
-        }
-        case 'shutdown': {
-            await READER.destroy()
-            close()
-            return returnSuccess()
-        }
-        case 'update-settings': {
-            Object.assign(SETTINGS, message.data.settings)
-            return returnSuccess()
-        }
-    }
+    Log.debug(`Received message with action ${message.data.action}.`, SCOPE)
+    WORKER.handleMessage(message)
 }
