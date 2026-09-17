@@ -25,6 +25,7 @@ import type {
 import { Log } from 'scoped-event-log'
 import { parseFile, parseHeader } from './CsvParser'
 import { headerToBiosignalHeader } from '#root/src/util'
+import InlineCsvWorker from '../workers/csv.worker.ts?worker&inline'
 import type {
     CsvHeader,
     CsvParseOptions,
@@ -141,11 +142,7 @@ export default class CsvImporter extends GenericStudyImporter implements SignalS
 
     getFileTypeWorker (override?: string): Worker | null {
         const workerOverride = this._workerOverrides.get(override || 'csv')
-        const worker = workerOverride ? workerOverride() : new Worker(
-            /* webpackChunkName: 'csv.worker' */
-            new URL('../workers/csv.worker', import.meta.url),
-            { type: 'module' },
-        )
+        const worker = workerOverride ? workerOverride() : new InlineCsvWorker()
         Log.registerWorker(worker)
         return worker
     }
