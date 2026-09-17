@@ -10,14 +10,14 @@
  */
 
 import { ServiceWorkerSubstitute } from '@epicurrents/core'
-import { validateCommissionProps } from '@epicurrents/core/dist/util'
+import { validateCommissionProps } from '@epicurrents/core/util'
 import type {
     BiosignalCacheDerivationSlot,
     ConfigChannelFilter,
     GetSignalsResponse,
     WorkerMessage,
     WorkerSubstitute,
-} from '@epicurrents/core/dist/types'
+} from '@epicurrents/core/types'
 import { Log } from 'scoped-event-log'
 import CsvReader from './CsvReader'
 import type { CsvParseOptions } from '#types'

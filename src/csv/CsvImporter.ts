@@ -13,7 +13,7 @@
  */
 
 import { GenericStudyImporter } from '@epicurrents/core'
-import { detectTextEncoding } from '@epicurrents/core/dist/util'
+import { detectTextEncoding } from '@epicurrents/core/util'
 import type {
     AssociatedFileType,
     BiosignalChannel,
@@ -21,7 +21,7 @@ import type {
     SignalStudyImporter,
     StudyContextFile,
     StudyFileContext,
-} from '@epicurrents/core/dist/types'
+} from '@epicurrents/core/types'
 import { Log } from 'scoped-event-log'
 import { parseFile, parseHeader } from './CsvParser'
 import { headerToBiosignalHeader } from '#root/src/util'

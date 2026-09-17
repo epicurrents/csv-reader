@@ -50,7 +50,7 @@ vi.mock('@epicurrents/core', () => ({
     },
 }))
 
-vi.mock('@epicurrents/core/dist/util', () => ({
+vi.mock('@epicurrents/core/util', () => ({
     detectTextEncoding: () => ({ label: 'utf-8', constructor: Uint8Array }),
     fetchTextFile: vi.fn(),
     readTextFile: vi.fn(),
@@ -79,7 +79,7 @@ describe('CsvReader.setupStudy', () => {
 
     beforeEach(async () => {
         vi.clearAllMocks()
-        const util = await import('@epicurrents/core/dist/util')
+        const util = await import('@epicurrents/core/util')
         fetchTextFile = util.fetchTextFile as ReturnType<typeof vi.fn>
     })
 
@@ -135,7 +135,7 @@ describe('CsvReader.setupStudy', () => {
     })
 
     it('reads a local source file without fetching it', async () => {
-        const util = await import('@epicurrents/core/dist/util')
+        const util = await import('@epicurrents/core/util')
         const readTextFile = util.readTextFile as ReturnType<typeof vi.fn>
         const file = makeMockedFile(CSV_BODY)
         readTextFile.mockResolvedValue({ file, encoding: { label: 'utf-8', constructor: Uint8Array } })
@@ -170,7 +170,7 @@ describe('CsvReader._readSignalPart', () => {
 
     beforeEach(async () => {
         vi.clearAllMocks()
-        const util = await import('@epicurrents/core/dist/util')
+        const util = await import('@epicurrents/core/util')
         fetchTextFile = util.fetchTextFile as ReturnType<typeof vi.fn>
         fetchTextFile.mockResolvedValue({
             file: makeMockedFile(CSV_BODY),

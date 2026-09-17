@@ -21,14 +21,14 @@
 import {
     GenericSignalReader,
 } from '@epicurrents/core'
-import { detectTextEncoding, fetchTextFile, readTextFile } from '@epicurrents/core/dist/util'
+import { detectTextEncoding, fetchTextFile, readTextFile } from '@epicurrents/core/util'
 import type {
     AppSettings,
     SignalCachePart,
     SignalStudyReader,
     SignalDecodeResult,
     SignalSourceOptions,
-} from '@epicurrents/core/dist/types'
+} from '@epicurrents/core/types'
 import { Log } from 'scoped-event-log'
 import { parseFile } from './CsvParser'
 import { headerToBiosignalHeader } from '#root/src/util'

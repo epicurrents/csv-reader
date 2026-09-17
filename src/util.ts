@@ -12,7 +12,7 @@
  */
 
 import { GenericBiosignalHeader } from '@epicurrents/core'
-import type { BiosignalHeaderSignal } from '@epicurrents/core/dist/types'
+import type { BiosignalHeaderSignal } from '@epicurrents/core/types'
 import type { CsvHeader } from '#types'
 
 /**
