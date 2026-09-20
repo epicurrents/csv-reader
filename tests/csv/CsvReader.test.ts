@@ -79,6 +79,19 @@ const makeMockedFile = (body: string): File => {
 
 const APP_SETTINGS = { app: { dataChunkSize: 1024 * 1024 } } as any
 
+/** Standard gravity, the scale `getSignalScale` applies to a column headed in `g`. */
+const G_TO_MS2 = 9.80665
+
+/**
+ * Assert that a channel slice carries `raw` sample values normalised from `g` to m/s².
+ * @param data - Channel slice returned by `_readSignalPart`.
+ * @param raw - Sample values as they appear in the CSV body.
+ */
+const expectScaled = (data: Float32Array, raw: number[]) => {
+    expect(data).toHaveLength(raw.length)
+    raw.forEach((value, index) => expect(data[index]).toBeCloseTo(value*G_TO_MS2, 3))
+}
+
 describe('CsvReader.setupStudy', () => {
     let fetchTextFile: ReturnType<typeof vi.fn>
 
@@ -119,9 +132,10 @@ describe('CsvReader.setupStudy', () => {
         expect(r._dataUnitCount).toBe(1)
         // 100 Hz × 3 channels × 4 bytes/sample.
         expect(r._dataUnitSize).toBe(100 * 3 * 4)
-        // Total length is the time-vector span (last - first) = 0.03 s.
-        expect(r._totalDataLength).toBeCloseTo(0.03, 6)
-        expect(r._totalRecordingLength).toBeCloseTo(0.03, 6)
+        // The cache extent is padded up to whole one-second data units.
+        expect(r._totalDataLength).toBe(1)
+        // The reported extent is what the samples occupy: 4 samples at 100 Hz.
+        expect(r._totalRecordingLength).toBeCloseTo(0.04, 6)
         expect(r._discontinuous).toBe(false)
     })
 
@@ -198,11 +212,12 @@ describe('CsvReader._readSignalPart', () => {
 
     it('slices the correct sample range for the requested time window', async () => {
         const reader = await makeReader()
-        // 100 Hz × [0.01, 0.03) → samples 1..3.
+        // 100 Hz × [0.01, 0.03) → samples 1..2. The fixture is headed in `g`, which the parser
+        // normalises to m/s², so the slice carries the scaled values rather than the CSV ones.
         const part = await reader._readSignalPart(0.01, 0.03)
-        expect(Array.from(part.signals[0].data)).toEqual([4, 7])
-        expect(Array.from(part.signals[1].data)).toEqual([5, 8])
-        expect(Array.from(part.signals[2].data)).toEqual([6, 9])
+        expectScaled(part.signals[0].data, [4, 7])
+        expectScaled(part.signals[1].data, [5, 8])
+        expectScaled(part.signals[2].data, [6, 9])
     })
 
     it('clamps the requested end to the recording length', async () => {
@@ -214,13 +229,14 @@ describe('CsvReader._readSignalPart', () => {
         expect(part.signals[0].data.length).toBe(4)
     })
 
-    it('returns an empty signal list when the slice is empty after clamping', async () => {
+    it('returns the sample covering a window narrower than one sampling interval', async () => {
         const reader = await makeReader()
+        // The start is floored and the end ceilinged, so a window that falls inside a single
+        // sampling interval still covers the sample it lands in: [0.029, 0.0291) → sample 2.
         const part = await reader._readSignalPart(0.029, 0.0291)
-        // 100 Hz × [0.029, 0.0291) ≈ samples 2.9..2.91 → ceil rounding folds
-        // to the same sample index; signals[] should be empty.
         expect(part).not.toBeNull()
-        expect(part.signals).toEqual([])
+        expect(part.signals).toHaveLength(3)
+        expectScaled(part.signals[0].data, [7])
     })
 
     it('returns null on an invalid range (start < 0)', async () => {
