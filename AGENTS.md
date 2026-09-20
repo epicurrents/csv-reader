@@ -48,11 +48,11 @@ An unannotated column gets `unit: ''`, whose scale is 1.
 
 Reporting the padded length as the recording length advertises a phantom partial-second tail, and the per-page filter then rings across the data-to-empty boundary inside it. The full reasoning is in the comment above the assignment in [src/csv/CsvReader.ts](src/csv/CsvReader.ts); keep the two fields distinct when touching that block, and note that a test asserting one against the other's value is asserting the bug.
 
-## The substitute's commission vocabulary is smaller than the worker's
+## The worker and the substitute run the same handlers
 
-`CsvWorkerSubstitute` implements five of the actions the worker answers, and the rest reach core's base substitute, which warns and returns a failure — which rejects the commission. `GenericService.shutdown` and `unload` both await commissions the substitute does not answer. This is an open defect rather than a design choice; it is recorded in [ROADMAP.md](ROADMAP.md) along with the shape the fix should take, and it is the first thing to read before adding an action on either side.
+`CsvWorker` extends core's `SignalReaderWorker` and `CsvWorkerSubstitute` extends core's `SignalReaderWorkerSubstitute`, which runs those same handlers on the main thread with the reply transport redirected. The shared vocabulary therefore cannot differ between the two, which is the property that matters: an unanswered commission is reported as a failure, a failed commission rejects, and the service awaits one before tearing a study down, so a substitute missing a handler does not degrade a study but makes it impossible to close.
 
-The rule while it stands: **an action added to the worker is added to the substitute in the same commit.** The two lists are hand-maintained and nothing checks that they agree.
+What each class adds is `setup-worker`, the one commission where formats differ because it is where the file is opened. **Those two method bodies are identical and must stay so** — they are the only place a divergence is still possible here. Write the handler against `this._validate`, `this._success` and `this._failure`, which both bases provide with the same signatures, and it can be moved between them unchanged.
 
 ## Internal path aliases
 

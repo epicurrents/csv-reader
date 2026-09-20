@@ -29,7 +29,7 @@ Public surface
 - `parseFile(text, options?)` — full parse with per-column `Float32Array`s and the time vector.
 - `CsvImporter` — extends `GenericStudyImporter`.  Default file extensions: `.csv`, `.tsv`.  Use a `tab` delimiter via `CsvParseOptions.delimiter = '\t'`.
 - `CsvReader` — extends `GenericSignalReader`.  Overrides `_readSignalPart` to slice from the parsed arrays directly; no binary decoder, no further IO during cache fill.
-- `CsvWorkerSubstitute` — main-thread fallback when no SAB is available.  It answers five of the worker's commissions and reports the rest as unsupported, which rejects them; `shutdown` and `release-cache` are among the rest, so a study opened on this path cannot yet be torn down.  See ROADMAP.md.
+- `CsvWorkerSubstitute` — main-thread fallback when no SAB is available.  It runs the worker's own commission handlers through core's `SignalReaderWorkerSubstitute`, so it answers the same vocabulary; only `setup-worker` is implemented here.
 
 Constraints
 -----------

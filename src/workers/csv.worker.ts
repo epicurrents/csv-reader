@@ -9,7 +9,6 @@
 import { SETTINGS } from '@epicurrents/core'
 import { SignalReaderWorker } from '@epicurrents/core/workers'
 import type { WorkerMessage } from '@epicurrents/core/types'
-import { validateCommissionProps } from '@epicurrents/core/util'
 import { Log } from 'scoped-event-log'
 import CsvReader from '#csv/CsvReader'
 
@@ -34,7 +33,7 @@ class CsvWorker extends SignalReaderWorker<CsvReader> {
      * @param msgData - Data property from the message to the worker.
      */
     async setupWorker (msgData: WorkerMessage['data']) {
-        const data = validateCommissionProps(
+        const data = this._validate(
             msgData as WorkerMessage['data'] & {
                 authHeader?: string
                 file?: File
@@ -49,7 +48,7 @@ class CsvWorker extends SignalReaderWorker<CsvReader> {
             }
         )
         if (!data) {
-            return this._failure(msgData, `Validating commission props failed.`)
+            return false
         }
         if (!await this._reader.setupStudy({ authHeader: data.authHeader, file: data.file, url: data.url })) {
             return this._failure(msgData, `Setting up study failed.`)
