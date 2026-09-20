@@ -40,6 +40,9 @@ import type {
 
 const SCOPE = 'CsvReader'
 
+/** Signal slice returned by a part read: the cache part plus the decode metadata accompanying it. */
+type SignalPartResult = SignalCachePart & Omit<SignalDecodeResult, 'signals'>
+
 export default class CsvReader extends GenericSignalReader implements SignalStudyReader {
 
     /**
@@ -75,9 +78,11 @@ export default class CsvReader extends GenericSignalReader implements SignalStud
      * @param end - Range end in seconds of recording time (exclusive); clamped
      *              to the recording length.
      */
-    override async _readSignalPart (start: number, end: number)
-        : Promise<SignalCachePart & Omit<SignalDecodeResult, 'signals'> | null>
-    {
+    // The base method is asynchronous because a binary reader fetches the part it decodes. This
+    // one has nothing to await, the parse having happened at setup, but the signature is the
+    // override's to keep.
+    // eslint-disable-next-line @typescript-eslint/require-await
+    override async _readSignalPart (start: number, end: number): Promise<SignalPartResult | null> {
         if (!this._csvData || !this._fileTypeHeader) {
             Log.error(`Cannot read signal part: CSV data has not been loaded.`, SCOPE)
             return null

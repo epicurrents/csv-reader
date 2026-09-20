@@ -23,6 +23,9 @@ class CsvWorker extends SignalReaderWorker<CsvReader> {
                 postMessage(update)
             }
         })
+        // The action map is bound at dispatch by `handleMessage`, so an entry added unbound here
+        // still runs with this worker as its `this`.
+        // eslint-disable-next-line @typescript-eslint/unbound-method
         this.extendActionMap([['setup-worker', this.setupWorker]])
     }
 
@@ -65,5 +68,5 @@ onmessage = async (message: WorkerMessage) => {
         return
     }
     Log.debug(`Received message with action ${message.data.action}.`, SCOPE)
-    WORKER.handleMessage(message)
+    await WORKER.handleMessage(message)
 }

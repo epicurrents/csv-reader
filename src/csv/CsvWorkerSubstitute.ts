@@ -32,7 +32,7 @@ export default class CsvWorkerSubstitute extends ServiceWorkerSubstitute impleme
         if (!window.__EPICURRENTS__?.RUNTIME) {
             Log.error(`Reference to main application was not found!`, SCOPE)
         }
-        this._reader = new CsvReader(window.__EPICURRENTS__!.RUNTIME!.SETTINGS, parseOptions)
+        this._reader = new CsvReader(window.__EPICURRENTS__.RUNTIME!.SETTINGS, parseOptions)
         const updateCallback = (update: { [prop: string]: unknown }) => {
             if (update.action === 'cache-signals') {
                 this.returnMessage(update as WorkerMessage['data'])
@@ -159,7 +159,7 @@ export default class CsvWorkerSubstitute extends ServiceWorkerSubstitute impleme
                 }
             }
             default: {
-                super.postMessage(message)
+                return super.postMessage(message)
             }
         }
     }

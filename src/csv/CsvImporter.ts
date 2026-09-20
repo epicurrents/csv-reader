@@ -122,7 +122,7 @@ export default class CsvImporter extends GenericStudyImporter implements SignalS
      * caller-side validation. Used only by {@link readHeader} — the
      * full-file paths take care of populating the rest of `meta`.
      */
-    protected async _readHeaderInfo (source: ArrayBuffer): Promise<CsvHeader | null> {
+    protected _readHeaderInfo (source: ArrayBuffer): CsvHeader | null {
         const encoding = detectTextEncoding(source)
         const decoder = new TextDecoder(encoding.label)
         const text = decoder.decode(source)
@@ -213,6 +213,11 @@ export default class CsvImporter extends GenericStudyImporter implements SignalS
         return studyFile
     }
 
+    // Parsing a CSV header is synchronous, the whole source already being in hand, but the method
+    // stays `async` rather than returning a resolved promise: constructing the decoder throws on
+    // an encoding the platform has no decoder for, and a caller awaiting this expects that as a
+    // rejection rather than as a throw from the call itself.
+    // eslint-disable-next-line @typescript-eslint/require-await
     async readHeader (source: ArrayBuffer, _config?: unknown): Promise<CsvHeader | null> {
         return this._readHeaderInfo(source)
     }
