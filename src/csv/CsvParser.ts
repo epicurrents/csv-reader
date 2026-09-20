@@ -18,7 +18,12 @@
  *  - First non-comment row is the column header. Column labels follow the
  *    `<label>[<unit>]` syntax; a missing `[...]` means no unit annotation.
  *  - One time column required. Time is in seconds (float).
- *  - Remaining columns are sample values (float).
+ *  - Remaining columns are sample values (float), in whatever unit the column
+ *    annotation names. Samples are normalised to SI on parse — `getSignalScale`
+ *    maps the annotated unit to its factor, so a `g` column is returned in m/s²
+ *    and a `uV` column in V, the same as every other reader normalises on
+ *    decode. The column's `unit` keeps the annotation as written, because that
+ *    is the unit a consumer displays against.
  *  - Empty lines after the header are silently skipped.
  *
  * @package    epicurrents/csv-reader
@@ -26,6 +31,7 @@
  * @license    Apache-2.0
  */
 
+import { getSignalScale } from '@epicurrents/core/util'
 import { Log } from 'scoped-event-log'
 import type {
     CsvColumn,
@@ -187,12 +193,15 @@ export function parseFile (text: string, options: CsvParseOptions = {}): CsvPars
     const sampleCount = dataLines.length
     const timestamps = new Float32Array(sampleCount)
     const signals = header.columns.map(() => new Float32Array(sampleCount))
+    // Resolved once per column rather than per sample. An unannotated or unrecognised unit maps to
+    // 1, so a file that names no unit is returned exactly as written.
+    const scales = header.columns.map(col => getSignalScale(col.unit))
     for (let row = 0; row < sampleCount; row++) {
         const cells = dataLines[row].split(delimiter)
         timestamps[row] = parseFloat(cells[header.timeColumnIndex])
         for (let sigIdx = 0; sigIdx < header.columns.length; sigIdx++) {
             const colIdx = header.columns[sigIdx].columnIndex
-            signals[sigIdx][row] = parseFloat(cells[colIdx])
+            signals[sigIdx][row] = parseFloat(cells[colIdx])*scales[sigIdx]
         }
     }
     // Sampling-rate inference: median of inter-row deltas, with a spread check.

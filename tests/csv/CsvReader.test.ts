@@ -30,6 +30,7 @@ vi.mock('@epicurrents/core', () => ({
         protected _totalDataLength = 0
         protected _totalRecordingLength = 0
         protected _discontinuous = false
+        protected _derivationSlots: any[] = []
         protected _url = ''
         protected _authHeader = ''
         constructor(_encoding: any, settings: any) {
@@ -50,7 +51,11 @@ vi.mock('@epicurrents/core', () => ({
     },
 }))
 
-vi.mock('@epicurrents/core/util', () => ({
+// Only the IO is stubbed. Listing the module's exports instead silently drops every other one,
+// so a source file that later reaches for a pure helper from here gets `undefined` and fails in a
+// place unrelated to what the test is about.
+vi.mock('@epicurrents/core/util', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('@epicurrents/core/util')>()),
     detectTextEncoding: () => ({ label: 'utf-8', constructor: Uint8Array }),
     fetchTextFile: vi.fn(),
     readTextFile: vi.fn(),

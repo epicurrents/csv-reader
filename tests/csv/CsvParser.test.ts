@@ -99,17 +99,58 @@ describe('parseFile', () => {
     beforeEach(() => { vi.clearAllMocks() })
 
     it('materialises one Float32Array per non-time column', () => {
-        const csv = 'time,wrist_x[g],wrist_y[g]\n0,1,2\n0.01,3,4\n0.02,5,6\n'
+        const csv = 'time,wrist_x,wrist_y\n0,1,2\n0.01,3,4\n0.02,5,6\n'
         const result = parseFile(csv)!
         expect(result.signals).toHaveLength(2)
         expect(Array.from(result.signals[0])).toEqual([1, 3, 5])
         expect(Array.from(result.signals[1])).toEqual([2, 4, 6])
     })
 
+    it('normalises an annotated column to SI', () => {
+        const csv = 'time,wrist_x[g]\n0,1\n0.01,2\n'
+        const samples = Array.from(parseFile(csv)!.signals[0])
+        // Every reader normalises on decode, so a consumer reads one unit regardless of source.
+        expect(samples[0]).toBeCloseTo(9.80665, 4)
+        expect(samples[1]).toBeCloseTo(19.6133, 4)
+    })
+
+    it('normalises a microvolt column to volts', () => {
+        const csv = 'time,eeg[uV]\n0,1000000\n'
+        expect(Array.from(parseFile(csv)!.signals[0])[0]).toBeCloseTo(1, 5)
+    })
+
+    it('leaves an unannotated column exactly as written', () => {
+        const csv = 'time,raw\n0,1\n0.01,2\n'
+        expect(Array.from(parseFile(csv)!.signals[0])).toEqual([1, 2])
+    })
+
+    it('leaves a column whose unit has no SI factor as written', () => {
+        const csv = 'time,steps[count]\n0,7\n'
+        expect(Array.from(parseFile(csv)!.signals[0])[0]).toBe(7)
+    })
+
+    it('keeps the column unit as annotated, since that is the display unit', () => {
+        const csv = 'time,wrist_x[g]\n0,1\n'
+        expect(parseFile(csv)!.header.columns[0].unit).toBe('g')
+    })
+
+    it('scales each column by its own unit', () => {
+        const csv = 'time,a[g],b\n0,1,1\n'
+        const result = parseFile(csv)!
+        expect(Array.from(result.signals[0])[0]).toBeCloseTo(9.80665, 4)
+        expect(Array.from(result.signals[1])[0]).toBe(1)
+    })
+
     it('returns the time vector parallel to the signal arrays', () => {
         const csv = 'time,x\n0,1\n0.01,2\n0.02,3\n'
         const result = parseFile(csv)!
-        expect(Array.from(result.timestamps)).toEqual([0, 0.01, 0.02])
+        const timestamps = Array.from(result.timestamps)
+        // Compared to a tolerance because the vector is a Float32Array: 0.01 is not representable,
+        // so an exact match against the decimal literal fails on a correctly stored value.
+        expect(timestamps).toHaveLength(3)
+        for (const [i, expected] of [0, 0.01, 0.02].entries()) {
+            expect(timestamps[i]).toBeCloseTo(expected, 6)
+        }
     })
 
     it('infers sampling rate from the median inter-row delta', () => {
@@ -165,7 +206,10 @@ describe('parseFile', () => {
     it('handles a non-leftmost time column correctly', () => {
         const csv = 'x,time,y\n1,0,2\n3,0.01,4\n5,0.02,6\n'
         const result = parseFile(csv)!
-        expect(Array.from(result.timestamps)).toEqual([0, 0.01, 0.02])
+        const timestamps = Array.from(result.timestamps)
+        for (const [i, expected] of [0, 0.01, 0.02].entries()) {
+            expect(timestamps[i]).toBeCloseTo(expected, 6)
+        }
         // signals[0] should be the 'x' column, signals[1] the 'y' column.
         expect(Array.from(result.signals[0])).toEqual([1, 3, 5])
         expect(Array.from(result.signals[1])).toEqual([2, 4, 6])
