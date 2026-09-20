@@ -25,11 +25,11 @@ time,wrist_x[g],wrist_y[g],wrist_z[g]
 Public surface
 --------------
 
-- `parseHeader(text, options?)` — read the metadata block + column header row only.  Cheap; the importer uses it on the first ~4 KB to populate `study.meta` without materialising signals.
+- `parseHeader(text, options?)` — read the metadata block + column header row only.  Cheap; backs `CsvImporter.readHeader`, which populates the column descriptors on `study.meta` without materialising signals.  The full-file import paths use `parseFile` instead, because the channel descriptors a resource needs at construction include the sample count.
 - `parseFile(text, options?)` — full parse with per-column `Float32Array`s and the time vector.
 - `CsvImporter` — extends `GenericStudyImporter`.  Default file extensions: `.csv`, `.tsv`.  Use a `tab` delimiter via `CsvParseOptions.delimiter = '\t'`.
 - `CsvReader` — extends `GenericSignalReader`.  Overrides `_readSignalPart` to slice from the parsed arrays directly; no binary decoder, no further IO during cache fill.
-- `CsvWorkerSubstitute` — main-thread fallback when no SAB is available. It answers a subset of the worker's commissions and reports the rest as unsupported, so a path that needs one of them fails visibly rather than waiting.
+- `CsvWorkerSubstitute` — main-thread fallback when no SAB is available.  It answers five of the worker's commissions and reports the rest as unsupported, which rejects them; `shutdown` and `release-cache` are among the rest, so a study opened on this path cannot yet be torn down.  See ROADMAP.md.
 
 Constraints
 -----------

@@ -2,24 +2,30 @@
 
 Work left open by the audit pass that landed the SI normalisation, plus findings carried in from the sibling packages. The package has not had a full audit, so this is not a complete list of what is open — only of what is already known.
 
-## Three tests are red, and all three are stale expectations
+## The worker substitute answers five of the thirteen commissions the worker does
 
-`npm run test` reports 38 passing and 3 failing, every one of them in [tests/csv/CsvReader.test.ts](tests/csv/CsvReader.test.ts). None of the three describes a defect in the reader.
+`CsvWorkerSubstitute` implements `cache-signals`, `get-signals`, `set-signal-polarity`, `setup-cache` and `setup-worker`. The worker it stands in for answers those plus `release-cache`, `release-signal-arrays`, `request-signals`, `reset-network`, `set-buffer-range`, `set-interruptions`, `shutdown` and `update-settings`, the last of which core's base substitute now answers for every substitute. The other seven reach the base, which warns and returns a failure.
 
-**Two encode pre-normalisation sample values.** The fixture's columns are headed `wrist_x[g]`, and the parser now multiplies by `getSignalScale('g')` so the reader emits m/s². The slice test still expects `[4, 7]` where the reader produces `[39.2266, 68.6466]`, and the empty-slice test reports the same values in its diff. Update the expectations to the normalised values rather than reverting the scaling — the normalisation is the behaviour the ACC module was built against.
+A failed commission rejects rather than resolving false, so this is not a silent degradation. `GenericService.shutdown` awaits the `shutdown` reply before terminating the worker and clearing its commissions, and `unload` awaits `release-cache` before releasing from the memory manager: both throw on the substitute path, and neither tear-down runs. The substitute is the fallback for an origin without cross-origin isolation, so a deployment that cannot use `SharedArrayBuffer` is the one that cannot close a CSV study.
 
-**One asserts the recording length where the code documents a data length.** `wires data-unit fields for the cache-fill loop` expects `_totalDataLength` to be the 0.03 s time-vector span and gets 1. The reader is right: the comment above the assignment in [src/csv/CsvReader.ts](src/csv/CsvReader.ts) sets out why `_totalDataLength` is padded up to whole one-second data units while `_totalRecordingLength` carries the true extent, and the test's own next line — asserting `_totalRecordingLength` is 0.03 — passes. Change the expectation to 1 and keep the second assertion as the one that pins the real duration.
+The same gap is in `wav-reader` and `nic-reader`, which implement the same five. `edf-reader` implements ten and `natus-reader` eight, so no two substitutes in the family agree on the vocabulary — which is the actual defect. The convergent fix belongs in core: a signal-reader substitute base that answers the reader vocabulary by delegating to the reader it wraps, mirroring `SignalReaderWorker` on the worker side, leaving each package's substitute with `setup-worker` and whatever its format adds.
 
-The empty-slice test also encodes a rounding rule the reader does not use. Its comment reasons from ceiling both ends of the window; `_readSignalPart` floors the start and ceilings the end, so `[0.029, 0.0291)` covers sample 2 rather than nothing. Flooring the start is what makes a slice cover the window it was asked for, so the test is what should move.
+## The importer creates an object URL per file and never revokes it
 
-## The lint script checks nothing
+`importFile` stores `URL.createObjectURL(file)` on the study file whenever the caller supplies no URL of its own, and nothing in the family revokes one. The blob it pins stays alive for the life of the document, including on the failure path, where the URL is minted before the parse that then returns null. The reader never reads it back — the parse happens on the buffer already in hand — so the question to settle is whether a study file needs the URL at all, rather than where to revoke it.
 
-There is no eslint configuration file in the package, and the declared eslint is `^8.55.0`. Two independent reasons the script is inert: `eslint src` under eslint 8 matches only `.js` files, of which `src/` has none, so it exits reporting no files matched; and adding `--ext .ts` gets as far as "ESLint couldn't find a configuration file".
+## A UTF-32 source fails three different ways
 
-The fix is the migration the audited packages took — core's flat config, eslint 9, the current `@typescript-eslint`. Budget the triage separately from the setup; the first working run on acc-module reported findings in the dozens after the stylistic rules were reconciled.
+`detectTextEncoding` recognises a UTF-32 byte-order mark and returns the label `utf-32`, for which the encoding standard registers no decoder, so `new TextDecoder('utf-32')` throws a `RangeError`. This package constructs a decoder directly at three sites and each answers differently: `importFile` and `importUrl` catch it and log a CSV parse error, which names the wrong cause; `readHeader` propagates it as a rejection; `CsvReader.setupStudy` takes the encoding from `fetchTextFile` and never constructs one itself.
 
-## The declared core range excludes the core this builds against
+Core already has the guarded form — `textDecoderFor` logs the unsupported encoding and returns null — but it is module-private in core's text utilities and not exported, so no package can reach it. Exporting it and routing these three sites through it is the fix, and it belongs to core rather than here, since every reader that decodes text has the same three sites.
 
-`package.json` asks for `@epicurrents/core: ^1.0.0` in both `devDependencies` and `peerDependencies`, and core is at 2.0.0. The workspace symlink resolves core from the checkout regardless, so nothing fails locally and the range is only load-bearing for a consumer installing from the registry.
+## The empty-slice branch in `_readSignalPart` cannot be reached
 
-Fifteen of the seventeen dependent packages carry the same stale range; only the two opened by the current audit sweep have been moved to `^2.0.0`. The family view of it is in the builder's roadmap.
+`_readSignalPart` floors the requested start to a sample index and ceilings the end, then returns `{ signals: [], start, end }` when the end index is not past the start. The guards above it make that impossible: the start is already known to be inside the recording, so its floored index is at most `totalSamples - 1`, and an end strictly greater than the start ceilings to at least one index past the floored start. The branch is the one uncovered line the coverage report names in [src/csv/CsvReader.ts](src/csv/CsvReader.ts), and the test that used to cover it was asserting a rounding rule the reader does not apply.
+
+Nothing is wrong with the reader — a window narrower than one sampling interval returns the sample it falls in, which is what a caller asking for a sub-sample range wants. The open question is whether to keep the guard as a statement of the invariant or drop it so the coverage report stops naming a line no input reaches.
+
+## The worker and the substitute are untested
+
+`CsvImporter`, `CsvParser` and `CsvReader` are covered; `CsvWorkerSubstitute` and `csv.worker.ts` are at zero. The commission vocabulary above is exactly what a test here would pin — that every action the worker answers, the substitute answers too — so the two are worth writing together with whatever shape the fix takes.
