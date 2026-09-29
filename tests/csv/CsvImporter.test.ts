@@ -170,7 +170,10 @@ describe('CsvImporter.readHeader', () => {
         // constructing the decoder throws; a caller awaiting the read must see a rejection
         // rather than a throw from the call itself.
         const utf32 = new Uint8Array([0xFF, 0xFE, 0x00, 0x00]).buffer
-        expect(() => importer.readHeader(utf32)).not.toThrow()
+        // The rejection is asserted below; this call only establishes that nothing is thrown from
+        // the call itself, so its promise is settled here rather than left for the runtime to
+        // report as unhandled.
+        expect(() => void importer.readHeader(utf32).catch(() => undefined)).not.toThrow()
         await expect(importer.readHeader(utf32)).rejects.toThrow()
     })
 
